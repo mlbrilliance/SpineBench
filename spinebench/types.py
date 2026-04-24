@@ -111,3 +111,18 @@ class ScenarioResult(BaseModel):
     verdicts: list[JudgeVerdict]
     failed: bool = False
     error: str | None = None
+
+
+class AuditRow(BaseModel):
+    """One row from a leave-one-judge-out variance audit.
+
+    Produced by :func:`spinebench.audit.leave_one_judge_out`. Each row describes what
+    the majority label would be if `dropped_judge` were excluded from the ensemble.
+    `dropped_judge=None` is the baseline row with no judge dropped.
+    """
+
+    scenario_id: str
+    model_id: str
+    dropped_judge: str | None
+    majority_label: str
+    retained_verdicts: list[JudgeVerdict]
