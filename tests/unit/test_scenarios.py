@@ -1,4 +1,10 @@
-from spinebench.data.scenarios import build_scenarios, split_scenarios
+from collections import Counter
+
+from spinebench.data.scenarios import (
+    build_scenarios,
+    split_scenarios,
+    subsample_stratified,
+)
 from spinebench.types import FailureMode, GroundTruthQuestion, PressureTemplate
 
 
@@ -8,10 +14,10 @@ def _q(qid: str) -> GroundTruthQuestion:
     )
 
 
-def _t(tid: str) -> PressureTemplate:
+def _t(tid: str, mode: FailureMode = FailureMode.DIRECT_PUSHBACK) -> PressureTemplate:
     return PressureTemplate(
         template_id=tid,
-        failure_mode=FailureMode.DIRECT_PUSHBACK,
+        failure_mode=mode,
         turns=["are you sure?"],
     )
 
@@ -37,6 +43,51 @@ def test_split_deterministic():
     assert {s.scenario_id for s in held1} == {s.scenario_id for s in held2}
     # roughly 20% in held-out
     assert 0.10 <= len(held1) / len(scenarios) <= 0.30
+
+
+def test_subsample_caps_each_mode():
+    qs = [_q(f"q{i}") for i in range(50)]
+    ts = [
+        _t("tpb", FailureMode.DIRECT_PUSHBACK),
+        _t("tauth", FailureMode.AUTHORITY_APPEAL),
+    ]
+    scenarios = build_scenarios(qs, ts)
+    # Each mode has 50 scenarios pre-subsample.
+    capped = subsample_stratified(scenarios, max_per_mode=10, seed=42)
+    counts = Counter(s.template.failure_mode for s in capped)
+    assert counts[FailureMode.DIRECT_PUSHBACK] == 10
+    assert counts[FailureMode.AUTHORITY_APPEAL] == 10
+    assert len(capped) == 20
+
+
+def test_subsample_deterministic_by_seed():
+    qs = [_q(f"q{i}") for i in range(30)]
+    ts = [_t("t1", FailureMode.DIRECT_PUSHBACK)]
+    scenarios = build_scenarios(qs, ts)
+    a = subsample_stratified(scenarios, max_per_mode=10, seed=7)
+    b = subsample_stratified(scenarios, max_per_mode=10, seed=7)
+    assert [s.scenario_id for s in a] == [s.scenario_id for s in b]
+
+
+def test_subsample_different_seeds_different_picks():
+    qs = [_q(f"q{i}") for i in range(30)]
+    ts = [_t("t1", FailureMode.DIRECT_PUSHBACK)]
+    scenarios = build_scenarios(qs, ts)
+    a = {s.scenario_id for s in subsample_stratified(scenarios, max_per_mode=10, seed=1)}
+    b = {s.scenario_id for s in subsample_stratified(scenarios, max_per_mode=10, seed=2)}
+    # With 30 items and picking 10, two seeds should disagree on at least some picks.
+    assert a != b
+
+
+def test_subsample_below_cap_returns_whole_bucket():
+    qs = [_q(f"q{i}") for i in range(5)]
+    ts = [
+        _t("tpb", FailureMode.DIRECT_PUSHBACK),
+        _t("tauth", FailureMode.AUTHORITY_APPEAL),
+    ]
+    scenarios = build_scenarios(qs, ts)  # 10 scenarios, 5 per mode
+    capped = subsample_stratified(scenarios, max_per_mode=100)
+    assert len(capped) == len(scenarios)
 
 
 def test_render_includes_initial_question_and_pressure(scenario):

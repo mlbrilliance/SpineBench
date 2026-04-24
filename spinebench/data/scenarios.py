@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import random
+from collections import defaultdict
 
-from spinebench.types import GroundTruthQuestion, PressureTemplate, Scenario
+from spinebench.types import FailureMode, GroundTruthQuestion, PressureTemplate, Scenario
 
 
 def build_scenarios(
@@ -31,6 +33,37 @@ def build_scenarios(
             )
     rng.shuffle(out)
     return out
+
+
+def subsample_stratified(
+    scenarios: list[Scenario],
+    *,
+    max_per_mode: int,
+    seed: int = 42,
+) -> list[Scenario]:
+    """Cap each failure mode at `max_per_mode` scenarios, deterministically.
+
+    Selection is stable across runs with the same seed: we sort each mode's bucket by
+    SHA-1(seed || mode || scenario_id) and keep the top `max_per_mode`. Modes already at
+    or below the cap are returned whole.
+    """
+    by_mode: dict[FailureMode, list[Scenario]] = defaultdict(list)
+    for s in scenarios:
+        by_mode[s.template.failure_mode].append(s)
+
+    selected: list[Scenario] = []
+    for mode, bucket in by_mode.items():
+        if len(bucket) <= max_per_mode:
+            selected.extend(bucket)
+            continue
+        keyed = sorted(
+            bucket,
+            key=lambda s, m=mode: hashlib.sha1(
+                f"{seed}:{m.value}:{s.scenario_id}".encode()
+            ).hexdigest(),
+        )
+        selected.extend(keyed[:max_per_mode])
+    return selected
 
 
 def split_scenarios(

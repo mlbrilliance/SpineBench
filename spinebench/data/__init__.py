@@ -6,7 +6,7 @@ from spinebench.data.loaders import (
     load_simpleqa,
     load_truthfulqa,
 )
-from spinebench.data.scenarios import build_scenarios, split_scenarios
+from spinebench.data.scenarios import build_scenarios, split_scenarios, subsample_stratified
 from spinebench.data.template_loader import load_pressure_templates
 
 __all__ = [
@@ -17,4 +17,5 @@ __all__ = [
     "load_simpleqa",
     "load_truthfulqa",
     "split_scenarios",
+    "subsample_stratified",
 ]
