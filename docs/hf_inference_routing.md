@@ -1,95 +1,69 @@
 # HF Inference routing for SpineBench
 
-This doc lists which open models are actually routable through your HF Inference
-account at the time of this session, and what to do when a model returns
-`model_not_supported`.
+This doc lists which open models are routable through your HF Inference account at the
+time of this session, and what to do when a model returns `model_not_supported`.
 
-## Confirmed routable (as of 2026-04-24)
+**Last probed: 2026-04-24.** Re-run `scripts/probe_routable_models.py` after expanding
+HF Inference providers (https://huggingface.co/settings/inference-providers).
 
-These models successfully produced chat completions via
-`InferenceClient(provider="auto")`:
+## Confirmed routable — 2026-current models
 
-| Model | Family | Size | Role in pilot |
+These are the actively-recommended open-weight models for spring 2026:
+
+| Model | Family | Size | Suggested role |
 |---|---|---|---|
-| `Qwen/Qwen2.5-7B-Instruct` | Qwen 2.5 | 7B | subject (small tier) |
-| `Qwen/Qwen2.5-72B-Instruct` | Qwen 2.5 | 72B | subject (flagship) |
-| `Qwen/Qwen2.5-Coder-32B-Instruct` | Qwen 2.5 Coder | 32B | extractor + judge |
-| `meta-llama/Llama-3.1-70B-Instruct` | Llama 3.1 | 70B | subject |
-| `meta-llama/Llama-3.3-70B-Instruct` | Llama 3.3 | 70B | judge |
-| `deepseek-ai/DeepSeek-V3` | DeepSeek V3 | 671B (MoE) | judge |
+| `Qwen/Qwen3-235B-A22B-Instruct-2507` | Qwen 3 | 235B (22B active MoE) | judge / flagship subject |
+| `Qwen/Qwen3-32B` | Qwen 3 | 32B dense | subject |
+| `Qwen/Qwen3-Coder-Next` | Qwen 3 Coder | code-tuned | extractor |
+| `meta-llama/Llama-4-Scout-17B-16E-Instruct` | Llama 4 Scout | 109B total / 17B active | subject (cross-family) |
+| `deepseek-ai/DeepSeek-V3.1` | DeepSeek V3 | 671B (37B active) | judge |
+| `deepseek-ai/DeepSeek-V3.2-Exp` | DeepSeek V3.2 (experimental) | 671B | judge — output can be verbose, prefer V3.1 |
+| `deepseek-ai/DeepSeek-R1` | DeepSeek R1 | 671B reasoning | use cautiously — long reasoning traces |
+| `moonshotai/Kimi-K2.6` | Kimi K2 | ~1T MoE | subject (cross-family flagship) |
+| `MiniMaxAI/MiniMax-M2.7` | MiniMax M2 | varies | judge (different family) |
 
-## Confirmed NOT routable (return `model_not_supported`)
+## Confirmed NOT routable
 
-Models that returned `{"code": "model_not_supported"}` or `"is not a chat model"`
-from your HF account:
+These either return `model_not_supported`/HTTP errors or produce empty completions
+under your current provider config:
 
-- `Qwen/Qwen2.5-14B-Instruct`
-- `Qwen/Qwen2.5-Math-72B-Instruct`
-- `Qwen/QwQ-32B-Preview`
-- `meta-llama/Meta-Llama-3.1-8B-Instruct` (the 8B variant; the 70B works)
-- `mistralai/Mistral-7B-Instruct-v0.3`
-- `mistralai/Mistral-Nemo-Instruct-2407`
-- `google/gemma-2-9b-it`
-- `microsoft/Phi-3.5-mini-instruct`
-- `HuggingFaceH4/zephyr-7b-beta`
-- `CohereForAI/c4ai-command-r-plus-08-2024`
-
-This isn't a bug in the code — it reflects the providers enabled on your account.
+- `Qwen/Qwen3.6-27B`, `Qwen/Qwen3.6-35B-A3B` (latest Qwen 3.6 dense + small MoE — Apr 2026)
+- `Qwen/Qwen3.5-397B-A17B`, `Qwen/Qwen3.5-122B`, `Qwen/Qwen3.5-9B`, `Qwen/Qwen3.5-4B`
+- `meta-llama/Llama-4-Maverick-17B-128E-Instruct`
+- `deepseek-ai/DeepSeek-V3.2`
+- `google/gemma-4-27b-it`, `google/gemma-4-31b`, `google/gemma-4-9b-it`
+- `zai-org/GLM-5.1`, `zai-org/GLM-4.6`, `THUDM/glm-5`
+- `moonshotai/Kimi-K2.5`
+- `MiniMaxAI/MiniMax-M2`
 
 ## Why this happens
 
-HF Inference routes requests through upstream providers (Together, Fireworks,
-Novita, SambaNova, HF-Inference itself, etc.). Each model is hosted by different
-providers; your account has a subset of providers enabled via
-https://huggingface.co/settings/inference-providers .
-
-When `provider="auto"` and none of your enabled providers host the requested model,
-you get `model_not_supported`.
+HF Inference routes requests through upstream providers (Together, Fireworks, Novita,
+SambaNova, HF-Inference, Featherless, etc.). Each model is hosted by a subset of
+providers; your account has a subset of providers enabled. When `provider="auto"` and
+none of your enabled providers host the requested model, you get `model_not_supported`.
 
 ## How to expand
 
 1. Visit https://huggingface.co/settings/inference-providers
-2. Enable additional providers (at minimum: Together, Fireworks, HF-Inference, Novita).
-3. Re-run the one-shot probe in `scripts/probe_routable_models.py` (see below) to
-   verify which candidates now route.
+2. Enable additional providers (Together, Fireworks, Novita, Featherless cover most flagship models).
+3. Re-run `scripts/probe_routable_models.py` to confirm.
 
-## One-shot probe utility
+## Pilot v3 (current) — model panel
 
-Minimal snippet to check which models are currently routable from your account:
+With 9 routable 2026-current models:
 
-```python
-from spinebench.providers.hf_inference import HFInferenceProvider
-from spinebench.providers.base import ProviderError
-from spinebench.types import Turn
+- **3 subjects**: `Qwen/Qwen3-32B`, `meta-llama/Llama-4-Scout-17B-16E-Instruct`, `moonshotai/Kimi-K2.6`
+- **3 judges**: `Qwen/Qwen3-235B-A22B-Instruct-2507`, `deepseek-ai/DeepSeek-V3.1`, `MiniMaxAI/MiniMax-M2.7`
+- **Extractor**: `Qwen/Qwen3-Coder-Next`
 
-candidates = [
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "google/gemma-2-9b-it",
-    "mistralai/Mistral-Nemo-Instruct-2407",
-    # ... add more
-]
+Three different model families across the subjects, three different families across the
+judges, and the extractor is a code-tuned variant separate from any judge or subject.
+The only mild overlap is Qwen-32B subject vs Qwen-235B judge, but these are very
+different scales and posture (instruct vs flagship).
 
-for m in candidates:
-    try:
-        p = HFInferenceProvider(model_id=m, timeout_s=15, max_attempts=1)
-        p.generate([Turn(role="user", content="hi")], max_tokens=5)
-        print(f"OK  {m}")
-    except Exception as e:
-        print(f"FAIL {m}: {str(e)[:100]}")
-```
+## Pilot v1 (deprecated) — outdated panel
 
-## Impact on the pilot design
-
-With 6 routable models, the Week-3 pilot settled on:
-
-- **3 subjects**: Qwen-7B, Qwen-72B, Llama-3.1-70B (spans size and family).
-- **1 extractor**: Qwen-Coder-32B (code-tuned, cheap, capable at JSON).
-- **3 judges**: Llama-3.3-70B, DeepSeek-V3, Qwen-Coder-32B.
-
-**Known compromise**: Qwen-Coder-32B is both the extractor and one judge. A single
-judge shouldn't tip the ensemble, but leave-one-judge-out audit will flag any
-cases where that judge dominates majority votes.
-
-If HF provider routing expands before Week 4's full 50-model run, we can shift to
-a cleaner setup (distinct extractor, 3 non-overlapping judges from different
-families).
+Earlier pilot used Qwen2.5-7B/72B, Llama-3.1-70B / 3.3-70B, DeepSeek-V3, Qwen-Coder-32B.
+These were a generation behind the April 2026 frontier and have been replaced. See
+`docs/findings/pilot_w3_v1_findings.md` for the v1 leaderboard, retained for posterity.
