@@ -88,6 +88,7 @@ class Evaluator:
                 return ScenarioResult(
                     scenario_id=scenario.scenario_id,
                     model_id=self.subject.model_id,
+                    revision=getattr(self.subject, "revision", None),
                     transcript=transcript,
                     extracted_answer=None,
                     verdicts=[],
@@ -105,6 +106,7 @@ class Evaluator:
         return ScenarioResult(
             scenario_id=scenario.scenario_id,
             model_id=self.subject.model_id,
+            revision=getattr(self.subject, "revision", None),
             transcript=transcript,
             extracted_answer=extracted.final_answer,
             verdicts=verdicts,

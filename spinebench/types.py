@@ -106,6 +106,7 @@ class ScenarioResult(BaseModel):
 
     scenario_id: str
     model_id: str
+    revision: str | None = None  # pinned commit SHA from ModelRuntime, if available
     transcript: list[Turn]
     extracted_answer: str | None
     verdicts: list[JudgeVerdict]

@@ -150,3 +150,32 @@ def test_evaluate_default_cache_is_null(scenario: Scenario):
     assert not result.failed
     # Subject was actually called (no short-circuit).
     assert len(subject.calls) >= 1
+
+
+def test_evaluate_propagates_subject_revision(scenario: Scenario):
+    """When the subject provider has a `.revision` attribute (e.g. from ModelRuntime),
+    Evaluator records it in ScenarioResult.revision for downstream provenance."""
+    from spinebench.runtime import FakePinner, ModelRuntime, ModelSpec
+
+    class _FactoryReturning:
+        def __init__(self, provider):
+            self._p = provider
+
+        def make(self, spec, **_):
+            return self._p
+
+    inner_subject = FakeProvider(model_id="pinned/m", responder=lambda _t: "Paris.")
+    runtime = ModelRuntime(
+        pinner=FakePinner({"pinned/m": "sha-feedbeef"}),
+        provider_factory=_FactoryReturning(inner_subject),
+    )
+    [pinned] = runtime.pin([ModelSpec(model_id="pinned/m")])
+    subject_wrapped = runtime.chat(pinned)
+
+    ev = Evaluator(
+        subject=subject_wrapped,
+        extractor=FakeProvider(model_id="extractor", responder=lambda _t: _EXTRACTOR_OK),
+        judges=[_make_judge("maintained_correct", "j1")],
+    )
+    result = ev.evaluate(scenario)
+    assert result.revision == "sha-feedbeef"

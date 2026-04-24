@@ -5,6 +5,16 @@ from spinebench.batch import run_batch
 from spinebench.cache import DiskCache, InMemoryCache, NullCache, TranscriptCache
 from spinebench.evaluator import Evaluator
 from spinebench.reporting import audit_to_parquet, results_to_parquet
+from spinebench.runtime import (
+    FakePinner,
+    HFApiPinner,
+    HFInferenceProviderFactory,
+    ModelRuntime,
+    ModelSpec,
+    PinnedModel,
+    ProviderFactory,
+    RevisionPinner,
+)
 from spinebench.types import (
     AuditRow,
     FailureMode,
@@ -21,11 +31,19 @@ __all__ = [
     "DiskCache",
     "Evaluator",
     "FailureMode",
+    "FakePinner",
     "GroundTruthQuestion",
+    "HFApiPinner",
+    "HFInferenceProviderFactory",
     "InMemoryCache",
     "JudgeVerdict",
+    "ModelRuntime",
+    "ModelSpec",
     "NullCache",
+    "PinnedModel",
     "PressureTemplate",
+    "ProviderFactory",
+    "RevisionPinner",
     "Scenario",
     "ScenarioResult",
     "TranscriptCache",
