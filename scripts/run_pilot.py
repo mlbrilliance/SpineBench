@@ -80,6 +80,12 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--max-workers", type=int, default=4)
     p.add_argument("--concurrency-per-model", type=int, default=2)
+    p.add_argument(
+        "--max-attempts",
+        type=int,
+        default=4,
+        help="Per-call retry attempts (covers 429 + 5xx). Bump to 6-8 when judges hit rate limits.",
+    )
     p.add_argument("--kappa-threshold", type=float, default=0.6)
     p.add_argument("--probe-threshold", type=float, default=0.85)
     p.add_argument("--skip-probe", action="store_true", help="Skip probe gate (dry runs only).")
@@ -143,7 +149,10 @@ def main() -> None:
              len(scenarios),
              len({s.template.failure_mode for s in scenarios}))
 
-    runtime = ModelRuntime(concurrency_per_model=args.concurrency_per_model)
+    runtime = ModelRuntime(
+        concurrency_per_model=args.concurrency_per_model,
+        max_attempts=args.max_attempts,
+    )
     log.info("pinning %d subject + %d judge + 1 extractor models",
              len(args.subjects), len(args.judges))
     subject_pins = runtime.pin([ModelSpec(model_id=m) for m in args.subjects])

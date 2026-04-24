@@ -60,7 +60,7 @@ def main() -> None:
             msg = str(e).split("\n")[0][:100]
             print(f"FAIL {model_id}: {msg}")
             fail.append((model_id, msg))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             msg = f"{type(e).__name__}: {str(e)[:100]}"
             print(f"ERR  {model_id}: {msg}")
             fail.append((model_id, msg))
