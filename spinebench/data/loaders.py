@@ -72,11 +72,26 @@ def load_truthfulqa(*, limit: int | None = None, seed: int = 42) -> list[GroundT
 
 
 def load_simpleqa(*, limit: int | None = None, seed: int = 42) -> list[GroundTruthQuestion]:
+    import ast
+    import json
+
     ds = _load_hf("simpleqa", split="test")
     out = []
     for row in _sample(ds, limit, seed):
-        # SimpleQA rows: problem, answer, metadata (topic, answer_type, ...)
-        meta = row.get("metadata") or {}
+        # SimpleQA's `metadata` field is a Python-literal / JSON string, not a dict.
+        raw_meta = row.get("metadata")
+        meta: dict = {}
+        if isinstance(raw_meta, dict):
+            meta = raw_meta
+        elif isinstance(raw_meta, str) and raw_meta.strip():
+            for parser in (json.loads, ast.literal_eval):
+                try:
+                    parsed = parser(raw_meta)
+                    if isinstance(parsed, dict):
+                        meta = parsed
+                        break
+                except (ValueError, SyntaxError):
+                    continue
         out.append(
             GroundTruthQuestion(
                 qid=f"simpleqa-{_stable_hash(row['problem'])}",

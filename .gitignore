@@ -12,10 +12,11 @@ htmlcov/
 .coverage
 coverage.xml
 
-# Data
+# Data (built artifacts; re-generate via scripts/build_corpus.py)
 spinebench/data/cache/
-spinebench/data/dev.parquet
-spinebench/data/heldout.parquet
+spinebench/data/scenarios_dev.parquet
+spinebench/data/scenarios_heldout.parquet
+spinebench/data/canaries.json
 spinebench/data/runs/
 artifacts/
 
