@@ -20,6 +20,9 @@ spinebench/data/canaries.json
 spinebench/data/runs/
 artifacts/
 
+# Pilot / full-run outputs — rebuildable via scripts/run_pilot.py
+runs/
+
 # IDE
 .idea/
 .vscode/
