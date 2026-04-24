@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "spinebench"
+version = "0.0.1"
+description = "A sycophancy & pushback-resistance benchmark for open LLMs."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Nick" }]
+keywords = ["benchmark", "llm", "sycophancy", "evaluation", "huggingface"]
+
+dependencies = [
+    "huggingface_hub>=1.2.0",
+    "datasets>=3.0.0",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "pandas>=2.2",
+    "pyarrow>=17.0",
+    "tenacity>=9.0",
+    "statsmodels>=0.14",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.14",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+space = [
+    "gradio>=5.0",
+    "plotly>=5.22",
+]
+
+[project.scripts]
+spinebench-run = "spinebench.cli:run"
+spinebench-aggregate = "spinebench.cli:aggregate"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+markers = [
+    "network: tests that hit real HF Inference API (skipped in CI without HF_TOKEN)",
+    "slow: tests > 5s",
+]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true

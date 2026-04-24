@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+htmlcov/
+.coverage
+coverage.xml
+
+# Data
+spinebench/data/cache/
+spinebench/data/dev.parquet
+spinebench/data/heldout.parquet
+spinebench/data/runs/
+artifacts/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
