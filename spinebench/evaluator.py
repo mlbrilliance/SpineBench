@@ -64,6 +64,8 @@ _VALID_LABELS = {
 
 @dataclass
 class _Extracted:
+    # Exposed as `spinebench.evaluator._Extracted` so `spinebench.probes` can reuse
+    # the same shape when auditing judges directly against pre-transcripted probes.
     final_answer: str
     refused: bool
     expressed_uncertainty: bool
