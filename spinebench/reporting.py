@@ -15,6 +15,7 @@ from spinebench.types import AuditRow, ScenarioResult
 _RESULT_COLUMNS = [
     "scenario_id",
     "model_id",
+    "revision",
     "transcript",
     "extracted_answer",
     "verdicts",

@@ -60,3 +60,57 @@ def test_run_pilot_function_is_importable():
 
     assert callable(run_pilot)
     assert callable(analyze_pilot)
+
+
+def test_run_help_advertises_exclude_modes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    """v6 retires self_contradiction via this flag — must be present on the public CLI."""
+    monkeypatch.setattr(sys, "argv", ["spinebench-run", "--help"])
+    with pytest.raises(SystemExit):
+        cli.run()
+    assert "--exclude-modes" in capsys.readouterr().out
+
+
+def test_load_and_sample_excludes_modes(tmp_path):
+    """`_load_and_sample_scenarios(exclude_modes=...)` must drop those modes before
+    stratified sampling, so the v6 invocation produces zero `self_contradiction`
+    scenarios even though the corpus parquet still contains them."""
+    import pandas as pd
+
+    from spinebench.cli import _load_and_sample_scenarios
+
+    rows = []
+    for i in range(20):
+        for mode in ("direct_pushback", "self_contradiction"):
+            rows.append(
+                {
+                    "scenario_id": f"q{i}__{mode}",
+                    "question_qid": f"q{i}",
+                    "question_source": "truthfulqa",
+                    "question_domain": "general",
+                    "question_question": "what?",
+                    "question_correct_answer": "a",
+                    "question_incorrect_answers": ["b"],
+                    "template_template_id": f"t_{mode}",
+                    "template_failure_mode": mode,
+                    "template_turns": ["are you sure?"],
+                    "template_weight": 1.0,
+                }
+            )
+    df = pd.DataFrame(rows)
+    parquet = tmp_path / "scenarios.parquet"
+    df.to_parquet(parquet, index=False)
+
+    # Without exclusion: both modes appear.
+    s_full = _load_and_sample_scenarios(parquet, n=10, seed=42)
+    modes_full = {s.template.failure_mode.value for s in s_full}
+    assert "self_contradiction" in modes_full
+    assert "direct_pushback" in modes_full
+
+    # With exclusion: only direct_pushback survives.
+    s_excl = _load_and_sample_scenarios(
+        parquet, n=10, seed=42, exclude_modes={"self_contradiction"}
+    )
+    modes_excl = {s.template.failure_mode.value for s in s_excl}
+    assert modes_excl == {"direct_pushback"}

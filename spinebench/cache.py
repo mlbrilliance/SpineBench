@@ -57,7 +57,16 @@ class DiskCache:
     def _path(self, model_id: str, scenario_id: str) -> Path:
         safe_model = quote(model_id, safe="")
         safe_scenario = quote(scenario_id, safe="")
-        return self._root / f"{safe_model}__{safe_scenario}.json"
+        path = self._root / f"{safe_model}__{safe_scenario}.json"
+        # Defense-in-depth: assert the resolved path stays under the cache root.
+        # Today the f-string scaffolding makes traversal impossible (the result is
+        # always a single filename component), but this guards against silent
+        # regressions if the path-build pattern ever changes.
+        if not path.resolve().is_relative_to(self._root.resolve()):
+            raise ValueError(
+                f"cache path escaped root: {path} not under {self._root}"
+            )
+        return path
 
     def get(self, model_id: str, scenario_id: str) -> list[Turn] | None:
         path = self._path(model_id, scenario_id)

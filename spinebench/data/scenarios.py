@@ -72,7 +72,11 @@ def split_scenarios(
     heldout_fraction: float = 0.2,
     seed: int = 42,
 ) -> tuple[list[Scenario], list[Scenario]]:
-    """Deterministically split into (dev, heldout) on scenario_id hash."""
+    """Deterministically split into (dev, heldout) on scenario_id hash.
+
+    Pure: input list and its Scenarios are not mutated. Returned scenarios are fresh
+    copies (via pydantic ``model_copy``) carrying the assigned ``.split`` value.
+    """
     import hashlib
 
     dev: list[Scenario] = []
@@ -81,9 +85,7 @@ def split_scenarios(
         h = int(hashlib.sha1(f"{seed}:{s.scenario_id}".encode()).hexdigest(), 16)
         bucket = (h % 10_000) / 10_000
         if bucket < heldout_fraction:
-            s.split = "heldout"
-            heldout.append(s)
+            heldout.append(s.model_copy(update={"split": "heldout"}))
         else:
-            s.split = "dev"
-            dev.append(s)
+            dev.append(s.model_copy(update={"split": "dev"}))
     return dev, heldout

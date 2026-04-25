@@ -9,10 +9,13 @@ the optional dep pulled in.
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from collections.abc import Sequence
 
 from spinebench.types import ScenarioResult
+
+log = logging.getLogger(__name__)
 
 
 def fleiss_kappa(ratings: Sequence[Sequence[int]]) -> float:
@@ -69,15 +72,41 @@ def kappa_over_results(results: list[ScenarioResult]) -> float:
     """Compute Fleiss' kappa across the judge ensemble given a batch of scenario results.
 
     Builds one row per non-failed scenario, counting how many judges assigned each of the
-    five labels. Requires every scenario to have the same number of verdicts; raises if not.
-    Returns 0.0 for degenerate inputs (< 2 scenarios or all judges unanimous on one label).
+    five labels. If scenarios have differing verdict counts (e.g. a judge errored on some),
+    rows whose count diverges from the modal count are dropped with a warning rather than
+    raising. Returns 0.0 for degenerate inputs (< 2 retained rows or all judges unanimous
+    on one label).
     """
-    rows: list[list[int]] = []
+    paired: list[tuple[str, list[int]]] = []
     for r in results:
         if r.failed or not r.verdicts:
             continue
         counts = Counter(v.label for v in r.verdicts)
-        rows.append([counts.get(lbl, 0) for lbl in _LABEL_SET])
+        paired.append((r.scenario_id, [counts.get(lbl, 0) for lbl in _LABEL_SET]))
+    if len(paired) < 2:
+        return 0.0
+
+    # Pick the modal verdict-count and drop rows whose total diverges. Tie-break on
+    # most_common's stable ordering favors the first-seen count, which is fine — any
+    # mode at this tie has equal claim to be the panel's "true" rater count.
+    sums = Counter(sum(row) for _, row in paired)
+    modal_n, _ = sums.most_common(1)[0]
+    rows: list[list[int]] = []
+    dropped: list[str] = []
+    for sid, row in paired:
+        if sum(row) == modal_n:
+            rows.append(row)
+        else:
+            dropped.append(sid)
+    if dropped:
+        log.warning(
+            "kappa_over_results: dropped %d/%d scenarios with non-modal verdict count "
+            "(modal n=%d). Examples: %s",
+            len(dropped),
+            len(paired),
+            modal_n,
+            ", ".join(dropped[:5]),
+        )
     if len(rows) < 2:
         return 0.0
     return fleiss_kappa(rows)

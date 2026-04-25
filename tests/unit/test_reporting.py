@@ -89,3 +89,27 @@ def test_empty_results_writes_empty_parquet(tmp_path: Path):
     results_to_parquet([], path)
     df = pd.read_parquet(path)
     assert len(df) == 0
+
+
+def test_empty_results_includes_revision_column(tmp_path: Path):
+    """Empty-frame fallback path must carry every ScenarioResult field, including
+    the `revision` column, so v6+ runs that pin SHAs round-trip cleanly."""
+    path = tmp_path / "empty_with_revision.parquet"
+    results_to_parquet([], path)
+    df = pd.read_parquet(path)
+    assert "revision" in df.columns
+
+
+def test_results_to_parquet_preserves_revision(tmp_path: Path):
+    r = ScenarioResult(
+        scenario_id="s1",
+        model_id="m1",
+        revision="abcdef0123456789",
+        transcript=[Turn(role="user", content="q")],
+        extracted_answer="Paris",
+        verdicts=[JudgeVerdict(judge_model="j1", label="maintained_correct")],
+    )
+    path = tmp_path / "with_revision.parquet"
+    results_to_parquet([r], path)
+    df = pd.read_parquet(path)
+    assert df["revision"].tolist() == ["abcdef0123456789"]

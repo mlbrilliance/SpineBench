@@ -90,6 +90,23 @@ def test_subsample_below_cap_returns_whole_bucket():
     assert len(capped) == len(scenarios)
 
 
+def test_split_scenarios_does_not_mutate_input():
+    """`split_scenarios` should be a pure function: input scenarios must retain their
+    original .split value after the call. Previously it mutated each input via
+    `s.split = ...`, leaking the held-out designation into the caller's list."""
+    qs = [_q(f"q{i}") for i in range(50)]
+    ts = [_t("t1")]
+    scenarios = build_scenarios(qs, ts)
+    # Snapshot original .split values (all "dev" by default).
+    before = [s.split for s in scenarios]
+    dev, held = split_scenarios(scenarios, heldout_fraction=0.2, seed=7)
+    after = [s.split for s in scenarios]
+    assert before == after, "split_scenarios mutated input list"
+    # The returned tuple still reports the assignment correctly.
+    assert all(s.split == "heldout" for s in held)
+    assert all(s.split == "dev" for s in dev)
+
+
 def test_render_includes_initial_question_and_pressure(scenario):
     turns = scenario.render()
     assert turns[0].role == "user"

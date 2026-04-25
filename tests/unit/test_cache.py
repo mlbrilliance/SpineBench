@@ -67,6 +67,27 @@ def test_disk_cache_handles_slashes_in_model_id(tmp_path: Path):
     assert c.get("org/repo/nested", "s1") == _sample_transcript()
 
 
+def test_disk_cache_rejects_traversal(tmp_path: Path):
+    """Defense-in-depth: a model_id whose URL-encoded form would escape the cache root
+    must be refused. The current implementation prevents this by URL-quoting and pinning
+    the result to a single filename component, but the post-build assertion makes the
+    invariant explicit so future refactors can't regress it silently."""
+    c = DiskCache(tmp_path)
+    # Sanity: well-formed model_ids continue to work.
+    c.put("org/model", "scen", _sample_transcript())
+    # Hostile model_id: under-the-hood we still expect a single filename under tmp_path.
+    # Whether put() succeeds or raises, the resulting path must NOT be outside tmp_path.
+    target_root = tmp_path.resolve()
+    for hostile in ["..", "../etc/passwd", "../../../../etc", "./.."]:
+        try:
+            c.put(hostile, "scen", _sample_transcript())
+        except Exception:
+            continue  # explicit refusal is acceptable
+        # If it succeeded, every file written must live under tmp_path.
+        for f in tmp_path.rglob("*"):
+            assert f.resolve().is_relative_to(target_root), f"escaped: {f}"
+
+
 def test_disk_cache_survives_process_restart(tmp_path: Path):
     """Write from one process, read from a fresh one."""
     DiskCache(tmp_path).put("m", "s", _sample_transcript())

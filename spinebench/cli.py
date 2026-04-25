@@ -50,14 +50,17 @@ log = logging.getLogger(__name__)
 # spinebench-run
 # ---------------------------------------------------------------------------
 
-# Defaults pinned to the v1 pilot judge/extractor panel. Override via CLI flags
-# whenever a model drops off HF Inference routing.
+# Defaults pinned to the v6 (week-4) judge/extractor panel. The v5 manifest used
+# DeepSeek-V3.1 as a judge; per the v5 findings cross-judge replication note, V3.1
+# contributed only 3-7% to majority flips and was replaced with GLM-5.1 in v6 to
+# break DeepSeek-family overlap (DeepSeek-R1 is now a v6 subject). Override via
+# CLI flags whenever a model drops off HF Inference routing.
 DEFAULT_JUDGES = [
-    "Qwen/Qwen2.5-72B-Instruct",
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "deepseek-ai/DeepSeek-V3",
+    "Qwen/Qwen3-235B-A22B-Instruct-2507",
+    "zai-org/GLM-5.1",
+    "MiniMaxAI/MiniMax-M2.7",
 ]
-DEFAULT_EXTRACTOR = "Qwen/Qwen2.5-32B-Instruct"
+DEFAULT_EXTRACTOR = "Qwen/Qwen3-Coder-Next"
 
 
 def _run_parser() -> argparse.ArgumentParser:
@@ -97,8 +100,11 @@ def _run_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--subject-max-tokens",
         type=int,
-        default=512,
-        help="Subject reply token budget. Bump to 1024-2048 for reasoning models.",
+        default=1024,
+        help=(
+            "Subject reply token budget. 1024 is the v5+ floor (long-domain MMLU-Pro "
+            "answers need it); bump to 4096 for reasoning models like DeepSeek-R1."
+        ),
     )
     p.add_argument(
         "--judge-max-tokens",
@@ -111,12 +117,30 @@ def _run_parser() -> argparse.ArgumentParser:
     p.add_argument("--skip-probe", action="store_true", help="Skip probe gate (dry runs only).")
     p.add_argument("--skip-kappa-gate", action="store_true", help="Warn but don't fail on low kappa.")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--exclude-modes",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated failure_mode names to drop before stratified sampling "
+            "(e.g. 'self_contradiction'). Mirrors the same-named flag in "
+            "spinebench-aggregate."
+        ),
+    )
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
 
-def _load_and_sample_scenarios(path: Path, n: int, seed: int) -> list[Scenario]:
+def _load_and_sample_scenarios(
+    path: Path,
+    n: int,
+    seed: int,
+    *,
+    exclude_modes: set[str] | None = None,
+) -> list[Scenario]:
     df = pd.read_parquet(path)
+    if exclude_modes:
+        df = df[~df["template_failure_mode"].isin(exclude_modes)].reset_index(drop=True)
     rng = random.Random(seed)
     by_mode: dict[str, list[int]] = defaultdict(list)
     for idx, mode in enumerate(df["template_failure_mode"]):
@@ -162,8 +186,16 @@ def run_pilot(args: argparse.Namespace) -> None:
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
+    exclude_modes = {m.strip() for m in args.exclude_modes.split(",") if m.strip()}
+    if exclude_modes:
+        log.info("excluding failure modes: %s", sorted(exclude_modes))
     log.info("loading %d scenarios from %s", args.n_scenarios, args.scenarios_parquet)
-    scenarios = _load_and_sample_scenarios(args.scenarios_parquet, args.n_scenarios, args.seed)
+    scenarios = _load_and_sample_scenarios(
+        args.scenarios_parquet,
+        args.n_scenarios,
+        args.seed,
+        exclude_modes=exclude_modes or None,
+    )
     log.info(
         "  got %d scenarios across %d failure modes",
         len(scenarios),
@@ -264,6 +296,7 @@ def run_pilot(args: argparse.Namespace) -> None:
         "n_scenarios": len(scenarios),
         "n_subjects": len(subject_pins),
         "kappa": kappa,
+        "exclude_modes": sorted(exclude_modes),
         "subjects": [asdict(p) for p in subject_pins],
         "judges": [asdict(p) for p in judge_pins],
         "extractor": asdict(extractor_pin),

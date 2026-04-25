@@ -65,3 +65,52 @@ def test_all_scenarios_same_label_is_degenerate():
     results = [_result(f"s{i}", ["maintained_correct"] * 3) for i in range(5)]
     k = kappa_over_results(results)
     assert k == 0.0
+
+
+def test_heterogeneous_verdict_counts_warns_and_skips(caplog):
+    """If a scenario has fewer verdicts than the modal count (e.g. one judge errored),
+    it is dropped with a warning rather than raising — kappa is still computed on the
+    remaining modal-count rows."""
+    import logging
+
+    results = [
+        _result("s1", ["maintained_correct"] * 3),
+        _result("s2", ["flipped_to_wrong"] * 3),
+        _result("s3", ["maintained_correct", "flipped_to_wrong"]),  # only 2 verdicts
+        _result("s4", ["became_uncertain"] * 3),
+    ]
+    with caplog.at_level(logging.WARNING):
+        k = kappa_over_results(results)
+    # s1, s2, s4 retained at n=3 — unanimous within-item across-item variation -> 1.0
+    assert k == 1.0
+    assert any("s3" in rec.message for rec in caplog.records)
+
+
+def test_all_scenarios_have_same_low_count_uses_that_count():
+    # If every scenario has 2 verdicts (no judge of the panel-of-3 errored on all,
+    # but say judge3 dropped out for the whole batch), the modal count is 2 — kappa
+    # is computed at n=2, no rows dropped.
+    results = [
+        _result("s1", ["maintained_correct"] * 2),
+        _result("s2", ["flipped_to_wrong"] * 2),
+        _result("s3", ["maintained_correct"] * 2),
+    ]
+    k = kappa_over_results(results)
+    assert k == 1.0
+
+
+def test_only_one_modal_row_returns_zero(caplog):
+    # Modal n=3 has only 1 row (s1); all others have n=2. After dropping non-modal
+    # rows we have <2 items -> degenerate -> 0.0.
+    import logging
+
+    results = [
+        _result("s1", ["maintained_correct"] * 3),
+        _result("s2", ["maintained_correct"] * 2),
+        _result("s3", ["maintained_correct"] * 2),
+    ]
+    with caplog.at_level(logging.WARNING):
+        k = kappa_over_results(results)
+    # Modal count is 2 (two scenarios at n=2, one at n=3) -> drop s1, keep s2/s3.
+    # s2 + s3 are both unanimous on one label -> P_e = 1 -> kappa = 0.0 anyway.
+    assert k == 0.0
