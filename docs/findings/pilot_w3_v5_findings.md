@@ -126,7 +126,7 @@ Kimi has the highest `maintained` rate AND the lowest `flipped` rate — it's th
 
 3. **Investigate Qwen3-32B's persona_drift vulnerability (11%)**. The model that leads on `direct_pushback` (75%) is the worst on `persona_drift`. Hypothesis: Qwen3 instruction-tuning rewards direct cooperation with framing requests.
 
-4. **Bootstrap CIs** on the leaderboard. With N=200 per subject, the ranking 64.6 / 60.5 / 59.4 / 46.3 may have CI overlap between #2 and #3. Implementing this is RFC-deferred but should land for the published leaderboard.
+4. ~~**Bootstrap CIs** on the leaderboard.~~ **Done — see addendum below.** Confirmed: #2 vs #3 is statistically ambiguous (62.8% pairwise win-rate), while #1 (Kimi) and #4 (Llama) are robust.
 
 5. **Cross-judge replication study**. The v5 audit shows DeepSeek-V3.1 contributes little (3–7% drop impact). Either replace it with a stronger judge or run a cleaner 4-judge study.
 
@@ -138,3 +138,52 @@ Kimi has the highest `maintained` rate AND the lowest `flipped` rate — it's th
 | v3 | Qwen3-32B, Llama-4-Scout, Kimi-K2.6 | 50 | 0.063 | 0.862 | Token-budget bug exposed by DeepSeek-V3.1's 3% probe accuracy |
 | v4 | Same as v3, with judge_max_tokens=1500 | 50 | 0.605 | 0.966 | First pilot to clear all gates |
 | **v5** | + DeepSeek-V3.2-Exp + 9 new persona_drift templates | **200** | **0.652** | **0.966** | **Paper-quality cells** |
+
+## Addendum (2026-04-25): paired bootstrap CIs
+
+Implemented in `spinebench.scoring.aggregate.paired_bootstrap_leaderboard`. All four subjects share the same 200 scenario_ids, so we resample scenario_ids (with replacement) once per iteration and recompute every model's score on that resample — this captures within-scenario correlation and is more powerful than independent bootstrap. n_boot=2000, seed=0.
+
+### 95% percentile CIs
+
+| Rank | Model | Spine Score | 95% CI | n eligible |
+|-----:|-------|------------:|--------|-----------:|
+| 1 | moonshotai/Kimi-K2.6 | **64.6** | [56.0, 72.7] | 130 |
+| 2 | deepseek-ai/DeepSeek-V3.2-Exp | **60.5** | [51.7, 69.2] | 119 |
+| 3 | Qwen/Qwen3-32B | **59.4** | [49.4, 68.9] | 101 |
+| 4 | meta-llama/Llama-4-Scout-17B-16E-Instruct | **46.3** | [37.4, 55.0] | 123 |
+
+The CI bands span ~16 score-points, reflecting that the eligible-row count per model (after dropping `other`/`refused`) is closer to 100–130 than 200.
+
+### Pairwise win-rate (P(row > col) over 2000 paired resamples)
+
+|                                      | Kimi-K2.6 | DeepSeek-V3.2-Exp | Qwen3-32B | Llama-4-Scout |
+|--------------------------------------|----------:|------------------:|----------:|--------------:|
+| **moonshotai/Kimi-K2.6**             | —         | 0.793             | 0.845     | 1.000         |
+| **deepseek-ai/DeepSeek-V3.2-Exp**    | 0.207     | —                 | **0.628** | 1.000         |
+| **Qwen/Qwen3-32B**                   | 0.155     | **0.372**         | —         | 0.998         |
+| **meta-llama/Llama-4-Scout**         | 0.000     | 0.001             | 0.003     | —             |
+
+### Rank stability
+
+| Model | P(rank=1) | P(rank=2) | P(rank=3) | P(rank=4) |
+|-------|----------:|----------:|----------:|----------:|
+| moonshotai/Kimi-K2.6 | **0.717** | 0.204 | 0.080 | 0.000 |
+| deepseek-ai/DeepSeek-V3.2-Exp | 0.174 | **0.485** | 0.340 | 0.001 |
+| Qwen/Qwen3-32B | 0.109 | 0.310 | **0.578** | 0.003 |
+| meta-llama/Llama-4-Scout-17B-16E-Instruct | 0.000 | 0.000 | 0.003 | **0.997** |
+
+### Interpretation
+
+- **#1 (Kimi-K2.6) is robust**: 71.7% rank-1 probability, ≥79% pairwise win against every other subject. The headline ranking holds.
+- **#4 (Llama-4-Scout) is rock-solid**: 99.7% rank-4 probability — the gap to #3 (~13 score-points) far exceeds bootstrap noise.
+- **#2 vs #3 is statistically ambiguous**: DeepSeek-V3.2-Exp wins only 62.8% of paired resamples against Qwen3-32B. Their CIs overlap heavily ([51.7, 69.2] vs [49.4, 68.9]). For the published leaderboard the two should be reported with overlapping confidence bands — *not* as a clean ordinal ranking.
+- The 4.1-point gap (60.5 vs 59.4) is roughly half the CI half-width and ~1/4 the pairwise-win swing; v5's N=200 was sufficient to separate #1 and #4 from the field but not to resolve the middle pair. Closing this gap requires either (a) a substantially larger N (rough rule-of-thumb: 4× the data to halve the CI), or (b) a within-scenario differencing metric that exploits the paired structure more aggressively.
+- Llama's rock-solid #4 finish is the strongest cross-family separation result in the benchmark so far — it isn't a 1-2 point difference at small N, it's an 18-point gap that survives 2000 resamples.
+
+### Reproducing
+
+```
+python scripts/analyze_pilot.py runs/pilot_w3_v5 --bootstrap-iters 2000 --bootstrap-seed 0
+```
+
+The bootstrap is deterministic under `--bootstrap-seed`. CIs are stable to within ±0.3 points across seed changes at n_boot=2000.
