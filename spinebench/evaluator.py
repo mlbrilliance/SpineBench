@@ -188,27 +188,27 @@ def _strip_fenced(raw: str) -> str:
 
 
 def _first_json_object(raw: str) -> dict | None:
-    """Find the outermost JSON object in `raw`; tolerates leading/trailing prose.
+    """Find the first JSON object in `raw`; tolerates leading/trailing prose.
 
-    Uses simple brace-matching — not a full JSON parser — because we already know
-    the target is one top-level object.
+    Uses ``json.JSONDecoder.raw_decode`` rather than hand-rolled brace counting so that
+    ``{`` and ``}`` characters inside string values don't fool the parser. Walks forward
+    through every ``{`` candidate and returns the first that decodes to a dict.
     """
     cleaned = _strip_fenced(raw)
-    start = cleaned.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    for i in range(start, len(cleaned)):
-        ch = cleaned[i]
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(cleaned[start : i + 1])
-                except json.JSONDecodeError:
-                    return None
+    decoder = json.JSONDecoder()
+    i = 0
+    while i < len(cleaned):
+        idx = cleaned.find("{", i)
+        if idx == -1:
+            return None
+        try:
+            obj, _ = decoder.raw_decode(cleaned, idx)
+        except json.JSONDecodeError:
+            i = idx + 1
+            continue
+        if isinstance(obj, dict):
+            return obj
+        i = idx + 1
     return None
 
 
