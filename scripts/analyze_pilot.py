@@ -146,6 +146,15 @@ def main() -> None:
         default=0,
         help="RNG seed for the paired bootstrap.",
     )
+    parser.add_argument(
+        "--exclude-modes",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated failure_mode names to drop from the score "
+            "(e.g. 'self_contradiction'). Affects leaderboard, CIs, and per-mode tables."
+        ),
+    )
     args = parser.parse_args()
 
     manifest_path = args.pilot_dir / "run_manifest.json"
@@ -178,11 +187,19 @@ def main() -> None:
     board = _leaderboard(results)
     print(board.to_string(index=False))
 
+    excluded_modes: set[str] = {
+        m.strip() for m in args.exclude_modes.split(",") if m.strip()
+    }
+
     if args.bootstrap_iters > 0:
         mode_map = _scenarios_mode_map(args.scenarios)
         if not mode_map:
             print("\n[bootstrap skipped: scenarios parquet missing — pass --scenarios]")
         else:
+            if excluded_modes:
+                before = len(mode_map)
+                mode_map = {sid: m for sid, m in mode_map.items() if m.value not in excluded_modes}
+                print(f"\n[excluded modes {sorted(excluded_modes)}: {before} -> {len(mode_map)} scenarios eligible]")
             results_by_model = _df_to_results_by_model(results)
             try:
                 pb = paired_bootstrap_leaderboard(
@@ -225,6 +242,66 @@ def main() -> None:
                     probs = pb.rank_distribution[m]
                     rank_cells = "  ".join(f"  {p:5.3f}" for p in probs)
                     print(f"  {m:<46s}  {rank_cells}")
+
+                if pb.per_mode_ci:
+                    print("\n=== Per-failure-mode 95% CIs (paired bootstrap) ===")
+                    # Collect modes that show up for at least one model, sorted by name
+                    all_modes = sorted(
+                        {mode for cis in pb.per_mode_ci.values() for mode in cis},
+                        key=lambda x: x.value,
+                    )
+                    mode_header = " " * 48 + "  " + "  ".join(f"{mode.value[:18]:>18s}" for mode in all_modes)
+                    print(mode_header)
+                    for m in model_ids:
+                        cells = []
+                        for mode in all_modes:
+                            ci = pb.per_mode_ci.get(m, {}).get(mode)
+                            if ci is None:
+                                cells.append(f"{'-':>18s}")
+                            else:
+                                cells.append(f"{ci.point:5.1f}[{ci.lo:4.0f},{ci.hi:4.0f}]")
+                        print(f"  {m:<46s}  " + "  ".join(cells))
+
+                # Find the closest pair (overall pairwise win-rate nearest 0.5) and
+                # break out per-mode comparisons for it. This is the natural follow-up
+                # when the overall #2 vs #3 contest is ambiguous.
+                if len(model_ids) >= 2 and pb.per_mode_pairwise_win_rate:
+                    closest_pair = None
+                    closest_dist = 1.0
+                    for a in model_ids:
+                        for b in model_ids:
+                            if a == b:
+                                continue
+                            wr = pb.pairwise_win_rate[a][b]
+                            if abs(wr - 0.5) < closest_dist and wr >= 0.5:
+                                closest_dist = abs(wr - 0.5)
+                                closest_pair = (a, b)
+                    if closest_pair is not None:
+                        a, b = closest_pair
+                        print(
+                            f"\n=== Per-mode pairwise: {a} vs {b} "
+                            f"(overall win-rate {pb.pairwise_win_rate[a][b]:.3f}) ==="
+                        )
+                        print(f"  {'mode':<26s}  {a[:18]:>18s}  {b[:18]:>18s}  win_rate(A>B)")
+                        # Sort by how decisive the per-mode contest is
+                        rows = []
+                        for mode in all_modes:
+                            wr = pb.per_mode_pairwise_win_rate.get(mode, {}).get(a, {}).get(b)
+                            if wr is None:
+                                continue
+                            ci_a = pb.per_mode_ci.get(a, {}).get(mode)
+                            ci_b = pb.per_mode_ci.get(b, {}).get(mode)
+                            rows.append((mode, ci_a, ci_b, wr))
+                        rows.sort(key=lambda r: -abs(r[3] - 0.5))
+                        for mode, ci_a, ci_b, wr in rows:
+                            a_str = f"{ci_a.point:5.1f}" if ci_a else " -- "
+                            b_str = f"{ci_b.point:5.1f}" if ci_b else " -- "
+                            marker = " *" if abs(wr - 0.5) > 0.3 else ""
+                            print(
+                                f"  {mode.value:<26s}  {a_str:>18s}  {b_str:>18s}  "
+                                f"{wr:>5.3f}{marker}"
+                            )
+                        print("  (* = decisive: |win_rate - 0.5| > 0.3)")
 
     per_mode = _per_mode_breakdown(results, args.scenarios)
     if per_mode is not None:
