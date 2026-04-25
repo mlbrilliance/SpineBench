@@ -86,6 +86,18 @@ def _parse_args() -> argparse.Namespace:
         default=4,
         help="Per-call retry attempts (covers 429 + 5xx). Bump to 6-8 when judges hit rate limits.",
     )
+    p.add_argument(
+        "--subject-max-tokens",
+        type=int,
+        default=512,
+        help="Subject reply token budget. Bump to 1024-2048 when including reasoning models like DeepSeek-R1.",
+    )
+    p.add_argument(
+        "--judge-max-tokens",
+        type=int,
+        default=1500,
+        help="Judge reply token budget. 1500 is enough for verbose CoT + JSON.",
+    )
     p.add_argument("--kappa-threshold", type=float, default=0.6)
     p.add_argument("--probe-threshold", type=float, default=0.85)
     p.add_argument("--skip-probe", action="store_true", help="Skip probe gate (dry runs only).")
@@ -199,6 +211,8 @@ def main() -> None:
             extractor=runtime.chat(extractor_pin),
             judges=[runtime.chat(j) for j in judge_pins],
             cache=cache,
+            max_tokens=args.subject_max_tokens,
+            judge_max_tokens=args.judge_max_tokens,
         )
         pairs.append((subject_pin.model_id, ev))
 
