@@ -187,3 +187,62 @@ python scripts/analyze_pilot.py runs/pilot_w3_v5 --bootstrap-iters 2000 --bootst
 ```
 
 The bootstrap is deterministic under `--bootstrap-seed`. CIs are stable to within ±0.3 points across seed changes at n_boot=2000.
+
+## Addendum 2 (2026-04-25): per-mode CIs + the #2/#3 profile finding
+
+The aggregate "#2 vs #3 is a coin flip" hides a more interesting structure. Per-mode paired bootstrap on **deepseek-ai/DeepSeek-V3.2-Exp vs Qwen/Qwen3-32B** (overall paired win-rate 0.628):
+
+| Mode | DeepSeek-V3.2-Exp | Qwen3-32B | win_rate(DS > Qwen) |
+|------|------------------:|----------:|--------------------:|
+| escalating_insistence | 7.1 | 42.9 | **0.001** |
+| social_pressure | 57.1 | 88.9 | **0.006** |
+| authority_appeal | 64.3 | 40.0 | **0.976** |
+| persona_drift | 33.3 | 11.1 | **0.966** |
+| confident_wrongness | 72.7 | 33.3 | **0.960** |
+| fabricated_citation | 100.0 | 87.5 | **0.826** |
+| direct_pushback | 60.0 | 75.0 | 0.262 |
+| emotional_pressure | 69.2 | 60.0 | 0.710 |
+| false_premise | 60.0 | 54.5 | 0.666 |
+| self_contradiction | 100.0 | 100.0 | 0.500 |
+
+**Six of ten modes are decisive** (|win_rate − 0.5| > 0.3). The two models are not interchangeable — they are *complementary* under different attack types:
+
+- **DeepSeek-V3.2-Exp is the more general-purpose anti-sycophant**: dominates on attacks that exploit the model's social posture (`authority_appeal`, `persona_drift`, `confident_wrongness`, `fabricated_citation`).
+- **Qwen3-32B specifically resists social/escalation pressure**: clear wins on `escalating_insistence` (+35.8 points) and `social_pressure` (+31.8). But folds under authority/confidence/persona attacks.
+
+This is a publishable cross-family finding: aggregate Spine Score *understates* model differentiation. A single scalar ranking obscures real, measurable robustness profiles. The benchmark's per-mode breakdown — not the headline number — is where the action is.
+
+### `self_contradiction` saturation: drop is safe
+
+`self_contradiction` returned 100/100/100/93 across subjects in v5 — saturated. Re-running the paired bootstrap with the mode excluded (`--exclude-modes self_contradiction`):
+
+| Rank | Model | Score (full) | Score (no SC) | Δ |
+|-----:|-------|-------------:|--------------:|--:|
+| 1 | Kimi-K2.6 | 64.6 [56.0, 72.7] | 60.9 [51.4, 69.6] | −3.7 |
+| 2 | DeepSeek-V3.2-Exp | 60.5 [51.7, 69.2] | 55.7 [46.4, 64.8] | −4.8 |
+| 3 | Qwen3-32B | 59.4 [49.4, 68.9] | 53.4 [42.6, 63.4] | −6.0 |
+| 4 | Llama-4-Scout | 46.3 [37.4, 55.0] | 36.5 [27.6, 45.9] | −9.8 |
+
+Rank order is unchanged. **Discrimination improves**:
+- Kimi's rank-1 probability rises from 71.7% to **79.2%**
+- DeepSeek-V3.2-Exp vs Qwen3-32B pairwise win-rate tightens from 0.628 to **0.689** (still not decisive but moving)
+- Llama's rank-4 probability hits **100%**
+
+Conclusion: dropping `self_contradiction` for the published leaderboard is methodologically clean — no rank reversal, marginal sharpening. The mode is a candidate for retirement, increased difficulty, or down-weighting in v6.
+
+### What's solidified for v6
+
+- The benchmark's headline output should be **(per-mode profile, scalar)**, not a single scalar. The per-mode contests are the publishable finding.
+- `self_contradiction` should be retired or hardened before the next pilot.
+- Adding subjects (DeepSeek-R1) is more valuable than adding N at this stage — N=200 already separates the field on per-mode contests; what's missing is *more profiles* to populate the comparison.
+- Closing the #2/#3 aggregate ambiguity is moot if we report per-mode profiles instead.
+
+### Reproducing the per-mode analysis
+
+```
+python scripts/analyze_pilot.py runs/pilot_w3_v5 --bootstrap-iters 2000 --bootstrap-seed 0
+python scripts/analyze_pilot.py runs/pilot_w3_v5 --bootstrap-iters 2000 --bootstrap-seed 0 \
+    --exclude-modes self_contradiction
+```
+
+Per-mode pairwise comparison auto-runs on the *closest* model pair (smallest |overall_win_rate − 0.5|).
