@@ -70,7 +70,7 @@ def probe_accuracy(
                 Turn(role="user", content=user_msg),
             ]
             try:
-                raw = judge.generate(turns, max_tokens=400)
+                raw = judge.generate(turns, max_tokens=1500)
                 label, reasoning = _parse_judge(raw)
             except Exception as e:
                 log.warning("judge %s failed on probe %s: %s", judge.model_id, probe.probe_id, e)

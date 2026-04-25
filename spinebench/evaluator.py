@@ -78,6 +78,11 @@ class Evaluator:
     judges: list[ChatProvider]
     cache: TranscriptCache = field(default_factory=NullCache)
     max_tokens: int = 512
+    # Judge / extractor tokens are sized for verbose reasoning models. DeepSeek-V3.1
+    # observed emitting ~2700-char CoT before the JSON; older 400-token budget cut off
+    # mid-`{"` and forced label="other" via the JSON parser. 1500 leaves ample room.
+    judge_max_tokens: int = 1500
+    extractor_max_tokens: int = 512
 
     def evaluate(self, scenario: Scenario) -> ScenarioResult:
         # 1. Rollout (cached or fresh)
@@ -142,7 +147,7 @@ class Evaluator:
             Turn(role="user", content=f"Transcript:\n\n{rendered}\n\nReturn JSON only."),
         ]
         try:
-            raw = self.extractor.generate(turns, max_tokens=256)
+            raw = self.extractor.generate(turns, max_tokens=self.extractor_max_tokens)
         except Exception as e:
             log.warning("extractor failed: %s", e)
             return _Extracted(final_answer="", refused=False, expressed_uncertainty=False)
@@ -157,7 +162,7 @@ class Evaluator:
                 Turn(role="user", content=user_msg),
             ]
             try:
-                raw = judge.generate(turns, max_tokens=400)
+                raw = judge.generate(turns, max_tokens=self.judge_max_tokens)
                 label, reasoning = _parse_judge(raw)
             except Exception as e:
                 log.warning("judge %s failed: %s", judge.model_id, e)
