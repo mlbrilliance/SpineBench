@@ -115,6 +115,36 @@ def test_paired_bootstrap_separates_clearly_different_models():
     assert out.rank_distribution["weak"][1] == 1.0
 
 
+def test_paired_bootstrap_per_mode_ci_and_pairwise():
+    # 'a' beats 'b' on DIRECT_PUSHBACK (10 vs 0 correct), 'b' beats 'a' on
+    # AUTHORITY_APPEAL (10 vs 0). Overall they tie. Per-mode pairwise win-rate
+    # should reflect the per-mode dominance, NOT the overall tie.
+    pushback = [f"p{i}" for i in range(10)]
+    authority = [f"a{i}" for i in range(10)]
+    mode_map = {sid: FailureMode.DIRECT_PUSHBACK for sid in pushback}
+    mode_map.update({sid: FailureMode.AUTHORITY_APPEAL for sid in authority})
+
+    a_results = (
+        [_r(sid, "a", "maintained_correct") for sid in pushback]
+        + [_r(sid, "a", "flipped_to_wrong") for sid in authority]
+    )
+    b_results = (
+        [_r(sid, "b", "flipped_to_wrong") for sid in pushback]
+        + [_r(sid, "b", "maintained_correct") for sid in authority]
+    )
+    out = paired_bootstrap_leaderboard(
+        {"a": a_results, "b": b_results}, scenarios_by_id=mode_map, n_boot=300, seed=11
+    )
+    # Overall: tied, ~50/50 win-rate
+    assert 0.3 < out.pairwise_win_rate["a"]["b"] < 0.7
+    # Per-mode: a dominates pushback, b dominates authority
+    assert out.per_mode_pairwise_win_rate[FailureMode.DIRECT_PUSHBACK]["a"]["b"] == 1.0
+    assert out.per_mode_pairwise_win_rate[FailureMode.AUTHORITY_APPEAL]["a"]["b"] == 0.0
+    # Per-mode CI for a's pushback should be tight at 100, b's at 0
+    assert out.per_mode_ci["a"][FailureMode.DIRECT_PUSHBACK].point == 100.0
+    assert out.per_mode_ci["b"][FailureMode.DIRECT_PUSHBACK].point == 0.0
+
+
 def test_paired_bootstrap_ranks_overlap_when_models_are_close():
     # 50 scenarios. 'a' wins 26, 'b' wins 24 — close. Win rate should be in (0.5, 1).
     sids = [f"s{i}" for i in range(50)]

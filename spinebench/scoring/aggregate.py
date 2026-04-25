@@ -206,6 +206,11 @@ class PairedBootstrap:
     pairwise_win_rate: dict[str, dict[str, float]]
     # rank_distribution[model_id][rank-1] = P(model finishes at rank). rank 1 = best.
     rank_distribution: dict[str, list[float]]
+    # per_mode_ci[model_id][mode] = ScoreCI for that mode (paired bootstrap).
+    per_mode_ci: dict[str, dict[FailureMode, ScoreCI]]
+    # per_mode_pairwise_win_rate[mode][a][b] = P(score_a_on_mode > score_b_on_mode | both present).
+    # Resamples where the mode is missing for either model are skipped (rare with N >= 20/mode).
+    per_mode_pairwise_win_rate: dict[FailureMode, dict[str, dict[str, float]]]
     n_boot: int
     n_scenarios: int
 
@@ -253,30 +258,57 @@ def paired_bootstrap_leaderboard(
     n_scen = len(shared_sids)
     rng = random.Random(seed)
 
+    # Modes that actually appear in the shared set (skip empty ones).
+    modes_present: set[FailureMode] = {
+        m for sid in shared_sids
+        for m in (by_model_lookup[model_ids[0]][sid][1],)
+        if m is not None
+    }
+
     # Point estimates over the shared set (so CI is anchored to what we resample).
     point_scores: dict[str, float] = {}
+    point_per_mode: dict[str, dict[FailureMode, float]] = {}
     for m in model_ids:
         lbls = [by_model_lookup[m][sid][0] for sid in shared_sids]
         modes = [by_model_lookup[m][sid][1] for sid in shared_sids]
-        point_scores[m], _, _ = _score_from_labels(lbls, modes)
+        ovr, by_mode, _ = _score_from_labels(lbls, modes)
+        point_scores[m] = ovr
+        point_per_mode[m] = by_mode
 
     # Sample storage
     boot_scores: dict[str, list[float]] = {m: [] for m in model_ids}
+    boot_per_mode: dict[str, dict[FailureMode, list[float]]] = {
+        m: {mode: [] for mode in modes_present} for m in model_ids
+    }
     pairwise_wins: dict[str, dict[str, int]] = {a: {b: 0 for b in model_ids if b != a} for a in model_ids}
     pairwise_ties: dict[str, dict[str, int]] = {a: {b: 0 for b in model_ids if b != a} for a in model_ids}
     rank_counts: dict[str, list[int]] = {m: [0] * len(model_ids) for m in model_ids}
+    per_mode_pair_wins: dict[FailureMode, dict[str, dict[str, int]]] = {
+        mode: {a: {b: 0 for b in model_ids if b != a} for a in model_ids}
+        for mode in modes_present
+    }
+    per_mode_pair_ties: dict[FailureMode, dict[str, dict[str, int]]] = {
+        mode: {a: {b: 0 for b in model_ids if b != a} for a in model_ids}
+        for mode in modes_present
+    }
+    per_mode_pair_n: dict[FailureMode, int] = {mode: 0 for mode in modes_present}
 
     for _ in range(n_boot):
         idx = [rng.randrange(n_scen) for _ in range(n_scen)]
         sampled_sids = [shared_sids[i] for i in idx]
         iter_scores: dict[str, float] = {}
+        iter_per_mode: dict[str, dict[FailureMode, float]] = {}
         for m in model_ids:
             lookup = by_model_lookup[m]
             lbls = [lookup[sid][0] for sid in sampled_sids]
             modes = [lookup[sid][1] for sid in sampled_sids]
-            s, _, _ = _score_from_labels(lbls, modes)
+            s, by_mode, _ = _score_from_labels(lbls, modes)
             iter_scores[m] = s
+            iter_per_mode[m] = by_mode
             boot_scores[m].append(s)
+            for mode in modes_present:
+                if mode in by_mode:
+                    boot_per_mode[m][mode].append(by_mode[mode])
 
         # Pairwise wins (ties split half-half later)
         for a in model_ids:
@@ -287,6 +319,23 @@ def paired_bootstrap_leaderboard(
                     pairwise_wins[a][b] += 1
                 elif iter_scores[a] == iter_scores[b]:
                     pairwise_ties[a][b] += 1
+
+        # Per-mode pairwise wins. Skip resamples where either model is missing the mode.
+        for mode in modes_present:
+            present_for_all = all(mode in iter_per_mode[m] for m in model_ids)
+            if not present_for_all:
+                continue
+            per_mode_pair_n[mode] += 1
+            for a in model_ids:
+                for b in model_ids:
+                    if a == b:
+                        continue
+                    sa = iter_per_mode[a][mode]
+                    sb = iter_per_mode[b][mode]
+                    if sa > sb:
+                        per_mode_pair_wins[mode][a][b] += 1
+                    elif sa == sb:
+                        per_mode_pair_ties[mode][a][b] += 1
 
         # Rank assignment (1 = best). Stable: tie-break by model_id for determinism.
         ordered = sorted(model_ids, key=lambda m: (-iter_scores[m], m))
@@ -323,10 +372,45 @@ def paired_bootstrap_leaderboard(
         m: [c / n_boot for c in counts] for m, counts in rank_counts.items()
     }
 
+    per_mode_ci: dict[str, dict[FailureMode, ScoreCI]] = {}
+    for m in model_ids:
+        per_mode_ci[m] = {}
+        for mode in modes_present:
+            samples = sorted(boot_per_mode[m][mode])
+            mode_n_eligible = sum(
+                1 for sid in shared_sids
+                if by_model_lookup[m][sid][1] == mode
+                and by_model_lookup[m][sid][0] not in ("other", "refused")
+            )
+            if not samples:
+                continue
+            per_mode_ci[m][mode] = ScoreCI(
+                point=point_per_mode[m].get(mode, float("nan")),
+                lo=_percentile(samples, lo_q),
+                hi=_percentile(samples, hi_q),
+                n_eligible=mode_n_eligible,
+            )
+
+    per_mode_win_rate: dict[FailureMode, dict[str, dict[str, float]]] = {}
+    for mode in modes_present:
+        n_valid = per_mode_pair_n[mode]
+        if n_valid == 0:
+            continue
+        per_mode_win_rate[mode] = {}
+        for a in model_ids:
+            per_mode_win_rate[mode][a] = {}
+            for b in model_ids:
+                if a == b:
+                    continue
+                wins = per_mode_pair_wins[mode][a][b] + 0.5 * per_mode_pair_ties[mode][a][b]
+                per_mode_win_rate[mode][a][b] = wins / n_valid
+
     return PairedBootstrap(
         ci=cis,
         pairwise_win_rate=win_rate,
         rank_distribution=rank_dist,
+        per_mode_ci=per_mode_ci,
+        per_mode_pairwise_win_rate=per_mode_win_rate,
         n_boot=n_boot,
         n_scenarios=n_scen,
     )
