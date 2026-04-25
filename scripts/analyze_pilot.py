@@ -16,6 +16,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from spinebench.scoring.aggregate import paired_bootstrap_leaderboard
+from spinebench.types import FailureMode, JudgeVerdict, ScenarioResult, Turn
+
 
 def _majority_label(row: pd.Series) -> str:
     """Majority vote over a row's verdicts; ties resolve to 'other'."""
@@ -73,6 +76,38 @@ def _per_mode_breakdown(
     return out.pivot(index="failure_mode", columns="model_id", values="spine_score")
 
 
+def _df_to_results_by_model(df: pd.DataFrame) -> dict[str, list[ScenarioResult]]:
+    """Reconstruct minimal ScenarioResult objects from results.parquet for the
+    canonical bootstrap path. transcript/extracted_answer are not used by the
+    bootstrap, so we leave them empty rather than re-serializing."""
+    out: dict[str, list[ScenarioResult]] = {}
+    for row in df.itertuples(index=False):
+        verdicts = [
+            JudgeVerdict(judge_model=v["judge_model"], label=v["label"])
+            for v in row.verdicts
+        ]
+        r = ScenarioResult(
+            scenario_id=row.scenario_id,
+            model_id=row.model_id,
+            transcript=[Turn(role="user", content="")],
+            extracted_answer="",
+            verdicts=verdicts,
+            failed=bool(row.failed),
+        )
+        out.setdefault(row.model_id, []).append(r)
+    return out
+
+
+def _scenarios_mode_map(scenarios_parquet: Path | None) -> dict[str, FailureMode]:
+    if scenarios_parquet is None or not scenarios_parquet.exists():
+        return {}
+    scenarios = pd.read_parquet(scenarios_parquet)
+    return {
+        row.scenario_id: FailureMode(row.template_failure_mode)
+        for row in scenarios[["scenario_id", "template_failure_mode"]].itertuples(index=False)
+    }
+
+
 def _self_preference_flags(audit: pd.DataFrame) -> pd.DataFrame:
     """For each model, report how often dropping a judge would change the majority label
     versus the baseline. Judges whose exclusion causes the most rank shifts are flagged."""
@@ -98,6 +133,18 @@ def main() -> None:
         type=Path,
         default=Path("spinebench/data/scenarios_dev.parquet"),
         help="Scenarios parquet (for per-mode breakdown).",
+    )
+    parser.add_argument(
+        "--bootstrap-iters",
+        type=int,
+        default=2000,
+        help="Paired bootstrap iterations for leaderboard CIs (0 to skip).",
+    )
+    parser.add_argument(
+        "--bootstrap-seed",
+        type=int,
+        default=0,
+        help="RNG seed for the paired bootstrap.",
     )
     args = parser.parse_args()
 
@@ -130,6 +177,54 @@ def main() -> None:
     print("\n=== Leaderboard (Spine Score, higher = more spine) ===")
     board = _leaderboard(results)
     print(board.to_string(index=False))
+
+    if args.bootstrap_iters > 0:
+        mode_map = _scenarios_mode_map(args.scenarios)
+        if not mode_map:
+            print("\n[bootstrap skipped: scenarios parquet missing — pass --scenarios]")
+        else:
+            results_by_model = _df_to_results_by_model(results)
+            try:
+                pb = paired_bootstrap_leaderboard(
+                    results_by_model,
+                    scenarios_by_id=mode_map,
+                    n_boot=args.bootstrap_iters,
+                    seed=args.bootstrap_seed,
+                )
+            except ValueError as exc:
+                print(f"\n[paired bootstrap skipped: {exc}]")
+            else:
+                print(
+                    f"\n=== Paired bootstrap 95% CIs "
+                    f"(n_boot={pb.n_boot}, n_scenarios={pb.n_scenarios}, seed={args.bootstrap_seed}) ==="
+                )
+                # Sort by point estimate, descending
+                ordered = sorted(pb.ci.items(), key=lambda kv: -kv[1].point)
+                for m, ci in ordered:
+                    print(
+                        f"  {m:<48s}  {ci.point:5.1f}  [{ci.lo:5.1f}, {ci.hi:5.1f}]   n={ci.n_eligible}"
+                    )
+
+                print("\n=== Pairwise win-rate (row-vs-column, fraction of resamples row > col) ===")
+                model_ids = [m for m, _ in ordered]
+                header = " " * 48 + "  " + "  ".join(f"{m[:10]:>10s}" for m in model_ids)
+                print(header)
+                for a in model_ids:
+                    cells = []
+                    for b in model_ids:
+                        if a == b:
+                            cells.append(f"{'-':>10s}")
+                        else:
+                            cells.append(f"{pb.pairwise_win_rate[a][b]:>10.3f}")
+                    print(f"  {a:<46s}  " + "  ".join(cells))
+
+                print("\n=== Rank stability (P(model finishes at this rank)) ===")
+                rank_header = " " * 48 + "  " + "  ".join(f"rank{i + 1:>3d}" for i in range(len(model_ids)))
+                print(rank_header)
+                for m in model_ids:
+                    probs = pb.rank_distribution[m]
+                    rank_cells = "  ".join(f"  {p:5.3f}" for p in probs)
+                    print(f"  {m:<46s}  {rank_cells}")
 
     per_mode = _per_mode_breakdown(results, args.scenarios)
     if per_mode is not None:
