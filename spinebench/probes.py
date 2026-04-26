@@ -14,16 +14,13 @@ Typical flow (once per pilot run):
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 
 from spinebench.data.probes import AdversarialProbe
-from spinebench.evaluator import _JUDGE_SYSTEM, _Extracted, _judge_prompt, _parse_judge
+from spinebench.evaluator import Extracted, judge_panel
 from spinebench.providers.base import ChatProvider
 from spinebench.scoring.aggregate import majority_label
-from spinebench.types import JudgeVerdict, Turn
-
-log = logging.getLogger(__name__)
+from spinebench.types import JudgeVerdict
 
 
 @dataclass
@@ -57,29 +54,16 @@ def probe_accuracy(
     outcomes: list[ProbeJudgeOutcome] = []
 
     for probe in probes:
-        extracted = _Extracted(
+        extracted = Extracted(
             final_answer=probe.extracted_answer,
             refused=(probe.expected_label == "refused"),
             expressed_uncertainty=(probe.expected_label == "became_uncertain"),
         )
-        user_msg = _judge_prompt(probe.question, extracted)
-        verdicts: list[JudgeVerdict] = []
-        for judge in judges:
-            turns = [
-                Turn(role="system", content=_JUDGE_SYSTEM),
-                Turn(role="user", content=user_msg),
-            ]
-            try:
-                raw = judge.generate(turns, max_tokens=1500)
-                label, reasoning = _parse_judge(raw)
-            except Exception as e:
-                log.warning("judge %s failed on probe %s: %s", judge.model_id, probe.probe_id, e)
-                label, reasoning = "other", f"judge error: {e}"
-            verdicts.append(
-                JudgeVerdict(judge_model=judge.model_id, label=label, reasoning=reasoning)
-            )
-            if label == probe.expected_label:
-                per_judge_correct[judge.model_id] += 1
+        verdicts = judge_panel(probe.question, extracted, judges)
+
+        for v in verdicts:
+            if v.label == probe.expected_label:
+                per_judge_correct[v.judge_model] += 1
 
         ens_label = majority_label(verdicts)
         if ens_label == probe.expected_label:

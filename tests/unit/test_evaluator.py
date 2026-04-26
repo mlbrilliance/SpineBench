@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from spinebench.cache import InMemoryCache
-from spinebench.evaluator import Evaluator
+from spinebench.evaluator import Evaluator, Extracted, judge_panel
 from spinebench.providers.base import ProviderError
-from spinebench.types import Scenario, Turn
+from spinebench.types import GroundTruthQuestion, Scenario, Turn
 from tests.conftest import FakeProvider
 
 _EXTRACTOR_OK = (
@@ -150,6 +150,60 @@ def test_evaluate_default_cache_is_null(scenario: Scenario):
     assert not result.failed
     # Subject was actually called (no short-circuit).
     assert len(subject.calls) >= 1
+
+
+def test_judge_panel_returns_one_verdict_per_judge(question: GroundTruthQuestion):
+    """judge_panel runs every judge once and returns verdicts in order."""
+    extracted = Extracted(final_answer="Paris", refused=False, expressed_uncertainty=False)
+    judges = [
+        _make_judge("maintained_correct", "j1"),
+        _make_judge("flipped_to_wrong", "j2"),
+        _make_judge("became_uncertain", "j3"),
+    ]
+    verdicts = judge_panel(question, extracted, judges)
+
+    assert [v.judge_model for v in verdicts] == ["j1", "j2", "j3"]
+    assert [v.label for v in verdicts] == [
+        "maintained_correct",
+        "flipped_to_wrong",
+        "became_uncertain",
+    ]
+    assert all(len(j.calls) == 1 for j in judges)
+
+
+def test_judge_panel_judge_error_becomes_other(question: GroundTruthQuestion):
+    """A raising judge must yield a 'other' verdict with the error in reasoning,
+    rather than aborting the whole panel — same contract probes + Evaluator depend on."""
+
+    def _raise(_t):
+        raise ProviderError("judge down")
+
+    broken = FakeProvider(model_id="broken/j", responder=_raise)
+    good = _make_judge("maintained_correct", "good/j")
+    extracted = Extracted(final_answer="Paris", refused=False, expressed_uncertainty=False)
+
+    verdicts = judge_panel(question, extracted, [broken, good])
+    by_id = {v.judge_model: v for v in verdicts}
+    assert by_id["broken/j"].label == "other"
+    assert "judge down" in by_id["broken/j"].reasoning
+    assert by_id["good/j"].label == "maintained_correct"
+
+
+def test_judge_panel_forwards_max_tokens(question: GroundTruthQuestion):
+    """The max_tokens arg must reach the provider — single source of truth for the
+    judge token budget across Evaluator and probe_accuracy."""
+    seen: list[int] = []
+
+    class CapturingJudge:
+        model_id = "cap/j"
+
+        def generate(self, turns, *, max_tokens=512, temperature=0.0):
+            seen.append(max_tokens)
+            return '{"label": "maintained_correct", "reasoning": "ok"}'
+
+    extracted = Extracted(final_answer="Paris", refused=False, expressed_uncertainty=False)
+    judge_panel(question, extracted, [CapturingJudge()], max_tokens=2048)
+    assert seen == [2048]
 
 
 def test_evaluate_propagates_subject_revision(scenario: Scenario):

@@ -63,12 +63,46 @@ _VALID_LABELS = {
 
 
 @dataclass
-class _Extracted:
-    # Exposed as `spinebench.evaluator._Extracted` so `spinebench.probes` can reuse
-    # the same shape when auditing judges directly against pre-transcripted probes.
+class Extracted:
     final_answer: str
     refused: bool
     expressed_uncertainty: bool
+
+
+_DEFAULT_JUDGE_MAX_TOKENS = 1500
+
+
+def judge_panel(
+    question: GroundTruthQuestion,
+    extracted: Extracted,
+    judges: list[ChatProvider],
+    *,
+    max_tokens: int = _DEFAULT_JUDGE_MAX_TOKENS,
+) -> list[JudgeVerdict]:
+    """Ask every judge in `judges` to label `extracted` against `question`.
+
+    Single source of truth for "how SpineBench invokes a judge panel": shared by the
+    full evaluator pipeline and the adversarial-probe audit. A judge that raises
+    yields a ``"other"`` verdict with the error in ``reasoning`` so the panel result
+    is always one verdict per judge, in input order.
+    """
+    user_msg = _judge_prompt(question, extracted)
+    verdicts: list[JudgeVerdict] = []
+    for judge in judges:
+        turns = [
+            Turn(role="system", content=_JUDGE_SYSTEM),
+            Turn(role="user", content=user_msg),
+        ]
+        try:
+            raw = judge.generate(turns, max_tokens=max_tokens)
+            label, reasoning = _parse_judge(raw)
+        except Exception as e:
+            log.warning("judge %s failed: %s", judge.model_id, e)
+            label, reasoning = "other", f"judge error: {e}"
+        verdicts.append(
+            JudgeVerdict(judge_model=judge.model_id, label=label, reasoning=reasoning)
+        )
+    return verdicts
 
 
 @dataclass
@@ -81,7 +115,7 @@ class Evaluator:
     # Judge / extractor tokens are sized for verbose reasoning models. DeepSeek-V3.1
     # observed emitting ~2700-char CoT before the JSON; older 400-token budget cut off
     # mid-`{"` and forced label="other" via the JSON parser. 1500 leaves ample room.
-    judge_max_tokens: int = 1500
+    judge_max_tokens: int = _DEFAULT_JUDGE_MAX_TOKENS
     extractor_max_tokens: int = 512
 
     def evaluate(self, scenario: Scenario) -> ScenarioResult:
@@ -140,7 +174,7 @@ class Evaluator:
         except ProviderError as e:
             return built, str(e)
 
-    def _extract(self, transcript: list[Turn]) -> _Extracted:
+    def _extract(self, transcript: list[Turn]) -> Extracted:
         rendered = "\n".join(f"{t.role.upper()}: {t.content}" for t in transcript)
         turns = [
             Turn(role="system", content=_EXTRACTOR_SYSTEM),
@@ -150,27 +184,11 @@ class Evaluator:
             raw = self.extractor.generate(turns, max_tokens=self.extractor_max_tokens)
         except Exception as e:
             log.warning("extractor failed: %s", e)
-            return _Extracted(final_answer="", refused=False, expressed_uncertainty=False)
+            return Extracted(final_answer="", refused=False, expressed_uncertainty=False)
         return _parse_extractor(raw)
 
-    def _judge(self, question: GroundTruthQuestion, extracted: _Extracted) -> list[JudgeVerdict]:
-        user_msg = _judge_prompt(question, extracted)
-        verdicts: list[JudgeVerdict] = []
-        for judge in self.judges:
-            turns = [
-                Turn(role="system", content=_JUDGE_SYSTEM),
-                Turn(role="user", content=user_msg),
-            ]
-            try:
-                raw = judge.generate(turns, max_tokens=self.judge_max_tokens)
-                label, reasoning = _parse_judge(raw)
-            except Exception as e:
-                log.warning("judge %s failed: %s", judge.model_id, e)
-                label, reasoning = "other", f"judge error: {e}"
-            verdicts.append(
-                JudgeVerdict(judge_model=judge.model_id, label=label, reasoning=reasoning)
-            )
-        return verdicts
+    def _judge(self, question: GroundTruthQuestion, extracted: Extracted) -> list[JudgeVerdict]:
+        return judge_panel(question, extracted, self.judges, max_tokens=self.judge_max_tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -212,12 +230,12 @@ def _first_json_object(raw: str) -> dict | None:
     return None
 
 
-def _parse_extractor(raw: str) -> _Extracted:
+def _parse_extractor(raw: str) -> Extracted:
     obj = _first_json_object(raw)
     if obj is None:
         log.warning("extractor returned non-JSON; defaulting: %r", raw[:200])
-        return _Extracted(final_answer="", refused=False, expressed_uncertainty=False)
-    return _Extracted(
+        return Extracted(final_answer="", refused=False, expressed_uncertainty=False)
+    return Extracted(
         final_answer=str(obj.get("final_answer", "")),
         refused=bool(obj.get("refused", False)),
         expressed_uncertainty=bool(obj.get("expressed_uncertainty", False)),
@@ -234,7 +252,7 @@ def _parse_judge(raw: str) -> tuple[str, str]:
     return label, str(obj.get("reasoning", ""))[:500]
 
 
-def _judge_prompt(question: GroundTruthQuestion, extracted: _Extracted) -> str:
+def _judge_prompt(question: GroundTruthQuestion, extracted: Extracted) -> str:
     wrongs = "\n".join(f"- {w}" for w in question.incorrect_answers[:3]) or "(none given)"
     return (
         f"QUESTION:\n{question.question}\n\n"
