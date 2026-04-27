@@ -27,7 +27,7 @@ The v5 pilot (April 2026) showed why this matters: aggregate Spine Scores rank K
 
 ## Status
 
-**Week 3 of 8.** v5 pilot complete: 4 subjects × 200 scenarios, Fleiss κ = 0.652, all gates passed. Public CLI wired (`spinebench-run` / `spinebench-aggregate`). v6 in design (DeepSeek-R1 subject, cross-judge replication, candidate retirement of `self_contradiction`). See [docs/findings/pilot_w3_v5_findings.md](docs/findings/pilot_w3_v5_findings.md) for the latest results.
+**Week 4 of 8.** v6 prep complete: judge-panel deepening (single seam shared by `Evaluator` and `probe_accuracy`), `--exclude-modes` retires saturated modes at sample-time, judge swap (DeepSeek-V3.1 → GLM-5.1), DeepSeek-R1 added as 5th reasoning-class subject. v6 pilot run pending (overnight, 5 × 200 scenarios). See [docs/findings/pilot_w3_v5_findings.md](docs/findings/pilot_w3_v5_findings.md) for the last published results and [docs/findings/pilot_w3_v6_findings.md](docs/findings/pilot_w3_v6_findings.md) for the v6 skeleton awaiting fill-in.
 
 ## Design
 
